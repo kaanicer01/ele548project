@@ -1,0 +1,232 @@
+#include "cache.h"
+#include <stdlib.h>
+#define SANDBOX_SIZE 2048
+uint32_t sandbox[SANDBOX_SIZE]; // sandbox
+uint32_t hash1;  // hash1
+uint32_t hash2;  // hash2
+uint32_t hash3;  // hash3
+uint32_t access_counter;  //  number of the accesses
+uint32_t candidate_offset[16][2];
+uint32_t offsetnum; //offset index
+uint32_t overallprocess; //evaluation count of each 16 candidates
+uint32_t score;
+uint32_t nextlinechecker;
+uint32_t arrangingchecker;
+uint32_t prefetchcount;
+uint32_t renew;
+
+uint32_t absol(uint32_t a){
+	 if(a<0) {
+	 	 return (-1)*a;
+	 }
+	 else{
+		return a;
+	 }
+}	 
+void CACHE::l1d_prefetcher_initialize() 
+{
+    cout << "CPU " << cpu << " L1D next line prefetcher" << endl;
+    for(uint32_t i=0; i<SANDBOX_SIZE; i++){
+            sandbox[i]=0;
+        }
+    hash1 = 0;  // hash1
+    hash2 = 0;  // hash2
+    hash3 = 0;  // hash3
+    access_counter = 0;  //  number of the accesses
+    offsetnum=0;
+    score=0;
+    overallprocess=0;
+    nextlinechecker=0;
+    arrangingchecker=0;
+    prefetchcount=0;
+    renew=0;
+    candidate_offset[0][0]=-8;
+    candidate_offset[1][0]=-7;
+    candidate_offset[2][0]=-6;
+    candidate_offset[3][0]=-5;
+    candidate_offset[4][0]=-4;
+    candidate_offset[5][0]=-3;
+    candidate_offset[6][0]=-2;
+    candidate_offset[7][0]=-1;
+    candidate_offset[8][0]=1;
+    candidate_offset[9][0]=2;
+    candidate_offset[10][0]=3;
+    candidate_offset[11][0]=4;
+    candidate_offset[12][0]=5;
+    candidate_offset[13][0]=6;
+    candidate_offset[14][0]=7;
+    candidate_offset[15][0]=8;
+    for(uint32_t i=0; i<16; i++){
+            candidate_offset[i][1]=0;
+        }
+  
+}
+
+void CACHE::l1d_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type)
+{
+uint64_t pf_addr = ((addr>>LOG2_BLOCK_SIZE)+candidate_offset[offsetnum][0]) << LOG2_BLOCK_SIZE;
+   renew++;
+   if (offsetnum < 16) {
+	// filling the sandbox
+    
+    
+    hash1=(pf_addr>>LOG2_BLOCK_SIZE)%2048;
+    hash2=(pf_addr>>LOG2_BLOCK_SIZE)>>11;
+    hash2=(hash2^hash1)%2048;
+    hash3=(pf_addr>>LOG2_BLOCK_SIZE)<<37;
+    hash3=hash3>>59;
+    hash3=(hash3^hash1)%2048;
+    hash3=hash3%2048;
+    sandbox[hash1]=1;
+    sandbox[hash2]=1;
+    sandbox[hash3]=1;
+    for (uint32_t i = 0; i < 4; i++) {
+    	//checking if the address in the sandbox
+    	hash1=((addr>>LOG2_BLOCK_SIZE)-i*candidate_offset[offsetnum][0])%2048;
+	hash2=((addr>>LOG2_BLOCK_SIZE)-i*candidate_offset[offsetnum][0])>>11;
+	hash2=(hash2^hash1)%2048;
+	hash3=((addr>>LOG2_BLOCK_SIZE)-i*candidate_offset[offsetnum][0])<<37;
+	hash3=hash3>>59;
+	hash3=(hash3^hash1)%2048;
+	hash3=hash3%2048;
+	if (sandbox[hash1]==1 && sandbox[hash2]==1 && sandbox[hash3]==1) {
+           	score++;
+        	}
+	
+     }
+		
+    access_counter++;
+    if(access_counter==512){
+		candidate_offset[offsetnum][1]=score;
+           	
+		for(uint32_t i=0; i<SANDBOX_SIZE; i++){
+            		     sandbox[i]=0;
+        		     }
+		offsetnum++;
+		score=0;
+		access_counter=0;
+		
+        	}
+		
+    
+}		
+    
+
+    DP ( if (warmup_complete[cpu]) {
+    cout << "[" << NAME << "] " << __func__ << hex << " base_cl: " << (addr>>LOG2_BLOCK_SIZE);
+    cout << " pf_cl: " << (pf_addr>>LOG2_BLOCK_SIZE) << " ip: " << ip << " cache_hit: " << +cache_hit << " type: " << +type << endl; });
+    if (offsetnum==16) {
+    if (arrangingchecker == 0) {
+    for (uint32_t i = 0; i < 16 - 1; i++) {
+        for (uint32_t j = 0; j < 16 - i - 1; j++) {
+            if (absol(candidate_offset[j][0]) > absol(candidate_offset[j + 1][0])) {
+                // Swap the elements
+		arrangingchecker=1;
+                uint32_t temp = candidate_offset[j][0];
+                candidate_offset[j][0] = candidate_offset[j + 1][0];
+                candidate_offset[j + 1][0] = temp;
+		
+		 uint32_t temp2 = candidate_offset[j][1];
+                candidate_offset[j][1] = candidate_offset[j + 1][1];
+                candidate_offset[j + 1][1] = temp2;
+            }
+        }
+	}
+    }
+       for (uint32_t k = 0; k < 16; k++) {
+       	    if (candidate_offset[k][1]>256) {
+	       nextlinechecker=1;
+	       if (candidate_offset[k][1]>768) {
+	       	  if (prefetchcount<6) {
+	       	  pf_addr = ((addr>>LOG2_BLOCK_SIZE)+candidate_offset[k][0]) << LOG2_BLOCK_SIZE;
+	       	  
+    		  prefetch_line(ip, addr, pf_addr, FILL_L1, 0);
+		  prefetchcount++;
+		  }
+		  if (prefetchcount<6) {
+		   pf_addr = ((addr>>LOG2_BLOCK_SIZE)+2*candidate_offset[k][0]) << LOG2_BLOCK_SIZE;
+		   prefetch_line(ip, addr, pf_addr, FILL_L1, 0);
+		    prefetchcount++;
+		  }
+		  if (prefetchcount<6) {
+		     pf_addr = ((addr>>LOG2_BLOCK_SIZE)+3*candidate_offset[k][0]) << LOG2_BLOCK_SIZE;
+		   prefetch_line(ip, addr, pf_addr, FILL_L1, 0);
+		    prefetchcount++;
+		  }
+    }
+		else if(candidate_offset[k][1]>512) {
+		     if (prefetchcount<6) {
+		      pf_addr = ((addr>>LOG2_BLOCK_SIZE)+candidate_offset[k][0]) << LOG2_BLOCK_SIZE;
+	       	  
+    		  prefetch_line(ip, addr, pf_addr, FILL_L1, 0);
+		   prefetchcount++;
+		  }
+		  if (prefetchcount<6) {
+		   pf_addr = ((addr>>LOG2_BLOCK_SIZE)+2*candidate_offset[k][0]) << LOG2_BLOCK_SIZE;
+		   prefetch_line(ip, addr, pf_addr, FILL_L1, 0);
+		   prefetchcount++;
+		  }
+    }
+		else{
+		if (prefetchcount<6) {
+			pf_addr = ((addr>>LOG2_BLOCK_SIZE)+candidate_offset[k][0]) << LOG2_BLOCK_SIZE;
+	       	  
+    		  prefetch_line(ip, addr, pf_addr, FILL_L1, 0);
+		   prefetchcount++;
+		  }
+    }
+    }
+}
+		if (nextlinechecker==0) {
+		   pf_addr = ((addr>>LOG2_BLOCK_SIZE)+1) << LOG2_BLOCK_SIZE;
+		   prefetch_line(ip, addr, pf_addr, FILL_L1, 0);
+}		
+}
+prefetchcount=0;
+	if(renew==15000000) {
+		for(uint32_t i=0; i<SANDBOX_SIZE; i++){
+            		     sandbox[i]=0;
+        	}
+    		hash1 = 0;  // hash1
+    		hash2 = 0;  // hash2
+    		hash3 = 0;  // hash3
+    		access_counter = 0;  //  number of the accesses
+    		offsetnum=0;
+    		score=0;
+    		overallprocess=0;
+    		nextlinechecker=0;
+    		arrangingchecker=0;
+    		prefetchcount=0;
+    		renew=0;
+    		candidate_offset[0][0]=-8;
+    		candidate_offset[1][0]=-7;
+    		candidate_offset[2][0]=-6;
+    		candidate_offset[3][0]=-5;
+    		candidate_offset[4][0]=-4;
+    		candidate_offset[5][0]=-3;
+    		candidate_offset[6][0]=-2;
+    		candidate_offset[7][0]=-1;
+    		candidate_offset[8][0]=1;
+    		candidate_offset[9][0]=2;
+    		candidate_offset[10][0]=3;
+    		candidate_offset[11][0]=4;
+    		candidate_offset[12][0]=5;
+    		candidate_offset[13][0]=6;
+    		candidate_offset[14][0]=7;
+    		candidate_offset[15][0]=8;
+    		for(uint32_t i=0; i<16; i++){
+            		     candidate_offset[i][1]=0;
+        	}
+  
+	}
+}
+
+void CACHE::l1d_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint32_t metadata_in)
+{
+
+}
+
+void CACHE::l1d_prefetcher_final_stats()
+{
+    cout << "CPU " << cpu << " L1D next line prefetcher final stats" << endl;
+}
